@@ -30,8 +30,9 @@ from strategy.signal_tracker    import SignalTracker
 from ai.ollama_client  import OllamaClient
 from ai.ai_committee   import AICommittee
 from alerts.telegram_alerts import TelegramAlerter
-from web.styles    import load_css
-from web.dashboard import render_signal_card, render_history_table, render_weekly_bar
+from web.styles       import load_css
+from web.dashboard    import render_signal_card, render_history_table, render_weekly_bar
+from web.audio_alerts import play_sounds
 
 logger = get_logger("app")
 
@@ -59,6 +60,8 @@ _STATE: Dict[str, Any] = {
     "events":           [],
     "scan_count":       0,
     "last_scan_time":   "",
+    # Cola de sonidos: ["BUY","SELL","WIN","LOSS"]
+    "sound_queue":      [],
 }
 
 # Instancias globales del scanner
@@ -82,6 +85,11 @@ def _log(msg: str) -> None:
     with _LOCK:
         _STATE["events"].insert(0, f"{datetime.now().strftime('%H:%M:%S')} {msg}")
         _STATE["events"] = _STATE["events"][:30]
+
+def _sound(sound_type: str) -> None:
+    """Encola un sonido: BUY, SELL, WIN, LOSS."""
+    with _LOCK:
+        _STATE["sound_queue"].append(sound_type)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -176,6 +184,11 @@ def _scanner_loop(symbol, tf_confirm, tf_trend,
                 try:
                     for ev in _tracker.update_all(price):
                         _log(ev)
+                        # Sonido según resultado del evento
+                        if "SL TOCADO" in ev or "PÉRDIDA" in ev:
+                            _sound("LOSS")
+                        elif any(x in ev for x in ("TP1","TP2","TP3","TP4","ALCANZADO","🏆","✅")):
+                            _sound("WIN")
                 except Exception as e:
                     logger.error(f"Tracker error: {e}")
             last_tracker_time = now
@@ -319,6 +332,7 @@ def _run_scan(tf_confirm: str, tf_trend: str, risk_usd: float, lot_size: float) 
     emoji = "🟢" if sig.signal_type == "BUY" else "🔴"
     _s("status_msg", f"{emoji} SEÑAL {sig.signal_type} #{sig_id} — ${entry:.2f} | IA: APROBADA")
     _log(f"{emoji} Señal #{sig_id} {sig.signal_type} ${entry:.2f} — TP1 ${calc.tp1:.2f}")
+    _sound(sig.signal_type)  # BUY o SELL
 
 
 # ── Iniciar / Detener ─────────────────────────────────────────────────────────
@@ -387,6 +401,13 @@ st.set_page_config(
 st.markdown(load_css(), unsafe_allow_html=True)
 
 state = _g()
+
+# ── Sonidos pendientes ────────────────────────────────────────────────────────
+_pending_sounds = state.get("sound_queue", [])
+if _pending_sounds:
+    play_sounds(_pending_sounds)
+    with _LOCK:
+        _STATE["sound_queue"] = []
 
 # ── Título ────────────────────────────────────────────────────────────────────
 st.markdown(
