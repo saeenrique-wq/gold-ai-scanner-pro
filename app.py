@@ -528,22 +528,42 @@ with tab_señal:
 # ════════════════════════════════════════════════════════
 with tab_hist:
     st.markdown("#### 📋 Historial de señales")
-    history = db.get_signals_history(100)
-    if history:
-        ft = st.selectbox("Filtrar", ["Todas", "BUY", "SELL", "GANADAS", "PERDIDAS"])
-        if ft == "BUY":    history = [s for s in history if s["signal_type"]=="BUY"]
-        elif ft == "SELL": history = [s for s in history if s["signal_type"]=="SELL"]
-        elif ft == "GANADAS":  history = [s for s in history if s.get("result")=="GANADA"]
-        elif ft == "PERDIDAS": history = [s for s in history if s.get("result")=="PERDIDA"]
-        render_history_table(history)
+    history_all = db.get_signals_history(100)
+    if history_all:
+        FILTROS = {
+            "Todas":    None,
+            "COMPRAS":  ("signal_type", "BUY"),
+            "VENTAS":   ("signal_type", "SELL"),
+            "GANADAS":  ("result",      "GANADA"),
+            "PERDIDAS": ("result",      "PERDIDA"),
+            "ACTIVAS":  ("status",      "ACTIVA"),
+            "LISTAS":   ("status",      "APROBADA"),
+        }
+        ft = st.selectbox(
+            "Filtrar por:",
+            list(FILTROS.keys()),
+            index=0,
+            key="hist_filter_select",
+        )
+        campo, valor = FILTROS[ft] if FILTROS[ft] else (None, None)
+        history = (
+            [s for s in history_all if s.get(campo) == valor]
+            if campo else history_all
+        )
+        if history:
+            render_history_table(history)
+        else:
+            st.info(f"No hay señales con filtro '{ft}' todavía.")
 
         st.markdown("---")
-        won  = sum(1 for s in history if s.get("result")=="GANADA")
-        lost = sum(1 for s in history if s.get("result")=="PERDIDA")
+        won   = sum(1 for s in history_all if s.get("result") == "GANADA")
+        lost  = sum(1 for s in history_all if s.get("result") == "PERDIDA")
         total = won + lost
         if total > 0:
-            st.metric("Efectividad histórica real", f"{won/total*100:.1f}%",
-                      help="Basado en señales cerradas. No es una promesa.")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Ganadas",   won)
+            c2.metric("Perdidas",  lost)
+            c3.metric("Efectividad", f"{won/total*100:.1f}%")
     else:
         st.info("No hay señales registradas todavía. El scanner está en búsqueda.")
 
