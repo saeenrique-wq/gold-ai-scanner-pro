@@ -25,10 +25,11 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 # ─── Símbolo y mercado ────────────────────────────────────────────────────────
-# Yahoo Finance usa "XAUUSD=X" para oro spot
-DEFAULT_YAHOO_SYMBOL   = "XAUUSD=X"
+# GC=F = Gold Futures en CME (funciona, precio real ~$4533/oz en mayo 2026)
+# XAUUSD=X fue descontinuado por Yahoo Finance — NO usar
+DEFAULT_YAHOO_SYMBOL   = "GC=F"
 DEFAULT_DISPLAY_SYMBOL = "XAUUSD"
-SYMBOL_ALTERNATIVES    = ["XAUUSD=X", "GC=F"]  # GC=F = Futuros de Oro
+SYMBOL_ALTERNATIVES    = ["GC=F", "GLD", "IAU"]
 
 # ─── Temporalidades ───────────────────────────────────────────────────────────
 # Mapa nombre → intervalo de yfinance → minutos
@@ -61,7 +62,7 @@ MACD_FAST     = 12
 MACD_SLOW     = 26
 MACD_SIGNAL   = 9
 ATR_PERIOD    = 14
-MIN_ATR_VALUE = 0.30   # Volatilidad mínima en USD para ORO
+MIN_ATR_VALUE = 1.00   # Volatilidad mínima en USD para ORO (ajustado para GC=F ~$4500)
 
 # ─── Estrategia ───────────────────────────────────────────────────────────────
 MIN_CONFIRMATIONS  = 5   # Mínimo de condiciones que deben cumplirse
@@ -72,7 +73,7 @@ CANDLES_NEEDED     = 210 # Velas mínimas para calcular EMA200
 # ─── Ollama ───────────────────────────────────────────────────────────────────
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_MODEL    = "llama3.2:3b"
-OLLAMA_TIMEOUT  = 45
+OLLAMA_TIMEOUT  = 90   # 90s para dar tiempo al modelo (incluye carga en frío)
 
 # ─── Planes de capital ───────────────────────────────────────────────────────
 CAPITAL_PLANS = {

@@ -114,7 +114,7 @@ def init_db() -> None:
                 ("capital",           "200"),
                 ("risk_usd",          "7"),
                 ("lot_size",          "0.01"),
-                ("symbol",            "XAUUSD=X"),
+                ("symbol",            "GC=F"),
                 ("display_symbol",    "XAUUSD"),
                 ("timeframe_entry",   "M5"),
                 ("timeframe_confirm", "M15"),

@@ -120,8 +120,24 @@ def _scanner_loop(symbol: str, tf_entry: str, tf_confirm: str, tf_trend: str,
 
     _set_state("market_connected", True)
     _set_state("error_msg", "")
-    _set_state("ollama_connected", _ollama.is_available())
-    _set_state("status_msg", "Mercado conectado. Iniciando escaneo...")
+
+    # Precio inicial inmediato
+    md0 = _connector.get_market_data()
+    if md0.connected and md0.last > 0:
+        _set_state("current_price", md0.last)
+        _set_state("bid", md0.bid)
+        _set_state("ask", md0.ask)
+
+    # Calentar Ollama en paralelo (carga modelo en RAM sin bloquear)
+    ollama_ok = _ollama.is_available()
+    _set_state("ollama_connected", ollama_ok)
+    if ollama_ok:
+        _set_state("status_msg", "Mercado conectado. Precalentando IA...")
+        _ollama.warmup_async()   # No bloquea — el scanner empieza igual
+    else:
+        _set_state("status_msg",
+                   "Mercado conectado. Ollama no detectado — escaneando sin IA.")
+    _add_event(f"Mercado conectado via {_connector.active_symbol} | Precio: ${md0.last:.2f}")
 
     last_price_poll  = 0.0
     last_scan_time   = 0.0
