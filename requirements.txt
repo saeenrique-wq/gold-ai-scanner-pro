@@ -1,0 +1,18 @@
+# GOLD AI SCANNER PRO — Dependencias
+# Instalar con: pip install -r requirements.txt
+
+# Interfaz visual
+streamlit>=1.32.0
+
+# Datos del mercado en vivo (Yahoo Finance — GRATIS)
+yfinance>=0.2.38
+
+# Cálculo de indicadores técnicos
+pandas>=2.0.0
+numpy>=1.26.0
+
+# Comunicación HTTP (Ollama + IAs externas + Telegram)
+requests>=2.31.0
+
+# Zona horaria y fechas
+python-dateutil>=2.8.2
