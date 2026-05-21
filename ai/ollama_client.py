@@ -25,13 +25,13 @@ from models import AIResponse
 logger = get_logger("ollama_client")
 
 _SYSTEM_PROMPT = (
-    "Eres un analista de trading de ORO (XAUUSD). "
-    "Evalúa SOLO los datos técnicos que te envíen. "
-    "NO inventes precios ni señales. "
-    "Responde ÚNICAMENTE con JSON válido, sin texto adicional. "
-    'Formato exacto: {"decision":"APROBAR","confianza":"ALTA","motivo":"texto corto","riesgo":"BAJO"} '
-    "Valores permitidos — decision: APROBAR, RECHAZAR, RIESGO_ALTO | "
-    "confianza: BAJA, MEDIA, ALTA | riesgo: BAJO, MEDIO, ALTO"
+    "Eres un experto en trading de ORO (XAUUSD/GC=F). "
+    "Reglas RSI: <30=sobreventa(alcista), 30-45=neutral-bajista, 45-55=neutral, 55-70=neutral-alcista, >70=sobrecompra(bajista). "
+    "Reglas MACD: alcista=momentum sube, bajista=momentum baja. "
+    "IMPORTANTE: Si score>=6 y MACD confirma dirección, APROBAR. Solo RECHAZAR si hay contradicción clara. "
+    "Responde SOLO con JSON sin texto extra. "
+    'Formato: {"decision":"APROBAR","confianza":"ALTA","motivo":"razon breve","riesgo":"BAJO"} '
+    "decision: APROBAR|RECHAZAR|RIESGO_ALTO | confianza: BAJA|MEDIA|ALTA | riesgo: BAJO|MEDIO|ALTO"
 )
 
 
@@ -169,17 +169,24 @@ class OllamaClient:
     def _build_prompt(self, data: Dict[str, Any]) -> str:
         ind  = data.get("indicators", {})
         tipo = data.get("type", "?")
+        rsi  = ind.get("rsi", 50)
+        # Explicar RSI explícitamente para evitar errores del modelo pequeño
+        if rsi < 30:
+            rsi_desc = f"RSI={rsi:.0f}(SOBREVENTA-alcista)"
+        elif rsi > 70:
+            rsi_desc = f"RSI={rsi:.0f}(SOBRECOMPRA-bajista)"
+        else:
+            rsi_desc = f"RSI={rsi:.0f}(neutral)"
+        macd_desc = "MACD=alcista(sube)" if ind.get("macd_bullish") else "MACD=bajista(baja)"
+        trend_desc = "H1=tendencia-SUBE" if ind.get("trend_up") else "H1=tendencia-BAJA"
         return (
-            f"Señal {tipo} XAUUSD. "
-            f"Entrada:{data.get('entry',0):.0f} SL:{data.get('sl',0):.0f} "
-            f"TP1:{data.get('tp1',0):.0f} RR:1:{data.get('rr_ratio',2):.0f}. "
-            f"RSI:{ind.get('rsi',0):.0f} "
-            f"EMA50:{ind.get('ema50',0):.0f} EMA200:{ind.get('ema200',0):.0f} "
-            f"MACD:{'alcista' if ind.get('macd_bullish') else 'bajista'} "
-            f"ATR:{ind.get('atr',0):.1f} "
-            f"H1:{'alcista' if ind.get('trend_up') else 'bajista'} "
-            f"Score:{data.get('score',0)}/10. "
-            "Evalúa y responde en JSON."
+            f"Señal {tipo} ORO. "
+            f"Precio:{data.get('entry',0):.0f} SL:{data.get('sl',0):.0f} "
+            f"TP1:{data.get('tp1',0):.0f} R/B:1:{data.get('rr_ratio',2):.0f}. "
+            f"{rsi_desc} {macd_desc} {trend_desc} "
+            f"ATR:{ind.get('atr',0):.1f} Score:{data.get('score',0)}/10. "
+            f"EMA50:{ind.get('ema50',0):.0f} EMA200:{ind.get('ema200',0):.0f}. "
+            "¿Esta señal es válida? Responde en JSON."
         )
 
     # ─── Parser ───────────────────────────────────────────────────────────────

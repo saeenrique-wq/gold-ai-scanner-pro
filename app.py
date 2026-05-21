@@ -466,13 +466,19 @@ with col_mkt:
             f'<div style="color:#888;font-size:0.8rem;">{state["active_symbol"]} — Yahoo Finance</div>'
             '</div>', unsafe_allow_html=True)
     else:
+        err_short = (state.get("error_msg","") or "Sin internet o Yahoo Finance caído")[:50]
         st.markdown(
             '<div style="background:#1a0000;border:1px solid #ff4444;border-radius:10px;'
             'padding:14px;text-align:center;">'
             '<div style="color:#ff4444;font-size:1.5rem;">●</div>'
-            '<div style="color:#ff4444;font-weight:700;font-size:1rem;">CONECTANDO...</div>'
-            '<div style="color:#888;font-size:0.8rem;">Buscando mercado en vivo</div>'
+            '<div style="color:#ff4444;font-weight:700;font-size:1rem;">SIN MERCADO</div>'
+            f'<div style="color:#888;font-size:0.75rem;">{err_short}</div>'
             '</div>', unsafe_allow_html=True)
+        if st.button("🔄 Reconectar mercado", key="btn_reconect_mkt"):
+            stop_scanner()
+            time.sleep(1)
+            start_scanner()
+            st.rerun()
 
 with col_ia:
     if ia_ok:
@@ -480,7 +486,7 @@ with col_ia:
             '<div style="background:#0d0020;border:1px solid #bf5fff;border-radius:10px;'
             'padding:14px;text-align:center;">'
             '<div style="color:#bf5fff;font-size:1.5rem;">●</div>'
-            '<div style="color:#bf5fff;font-weight:700;font-size:1rem;">IA PARA SEÑALES</div>'
+            '<div style="color:#bf5fff;font-weight:700;font-size:1rem;">IA ACTIVA</div>'
             f'<div style="color:#888;font-size:0.8rem;">Ollama · {db.get_setting("ollama_model","llama3.2:3b")}</div>'
             '</div>', unsafe_allow_html=True)
     else:
@@ -488,9 +494,14 @@ with col_ia:
             '<div style="background:#1a1400;border:1px solid #ffee44;border-radius:10px;'
             'padding:14px;text-align:center;">'
             '<div style="color:#ffee44;font-size:1.5rem;">●</div>'
-            '<div style="color:#ffee44;font-weight:700;font-size:1rem;">IA SIN CONEXIÓN</div>'
-            '<div style="color:#888;font-size:0.8rem;">Señales técnicas activas</div>'
+            '<div style="color:#ffee44;font-weight:700;font-size:1rem;">IA APAGADA</div>'
+            '<div style="color:#888;font-size:0.75rem;">Abre Ollama para activar</div>'
             '</div>', unsafe_allow_html=True)
+        if st.button("🔄 Reconectar IA", key="btn_reconect_ia"):
+            if _ollama:
+                ok = _ollama.is_available(force_check=True)
+                _s("ollama_connected", ok)
+                st.rerun()
 
 with col_price:
     if price > 0:
@@ -560,19 +571,38 @@ with tab_señal:
     active = active[:1]
 
     if active:
-        sig = active[0]
-        tipo_label = "🟢 SEÑAL DE COMPRA" if sig["signal_type"] == "BUY" else "🔴 SEÑAL DE VENTA"
-        st.markdown(f"#### ⚡ {tipo_label} — EN SEGUIMIENTO")
+        sig  = active[0]
+        tipo = sig["signal_type"]
+        tipo_label = "🟢 COMPRA" if tipo == "BUY" else "🔴 VENTA"
+
+        # Instrucción clara para el usuario
+        st.markdown(
+            f'<div style="background:#0d1117;border:2px solid '
+            f'{"#00ff88" if tipo=="BUY" else "#ff4444"};border-radius:10px;'
+            f'padding:14px;margin-bottom:12px;">'
+            f'<div style="font-size:1.1rem;font-weight:700;color:'
+            f'{"#00ff88" if tipo=="BUY" else "#ff4444"};">'
+            f'⚡ {tipo_label} — Entrar al mercado a ${sig["entry"]:.2f}</div>'
+            f'<div style="font-size:0.85rem;color:#8b949e;margin-top:6px;">'
+            f'Esta señal se generó a ese precio. Si el mercado está cerca, puedes entrar ahora.</div>'
+            f'</div>', unsafe_allow_html=True)
+
         render_signal_card(sig)
+
         if price > 0:
-            tipo = sig["signal_type"]
             dist_sl  = (price - sig["sl"])  if tipo == "BUY" else (sig["sl"]  - price)
             dist_tp1 = (sig["tp1"] - price) if tipo == "BUY" else (price - sig["tp1"])
-            c1, c2 = st.columns(2)
-            c1.metric("Distancia al SL",  f"${abs(dist_sl):.2f}",
-                      delta="Límite de pérdida", delta_color="inverse")
-            c2.metric("Distancia al TP1", f"${abs(dist_tp1):.2f}",
-                      delta="Primera meta", delta_color="normal")
+            diff_entry = price - sig["entry"]
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Precio ahora",   f"${price:,.2f}",
+                      delta=f"{diff_entry:+.2f} vs entrada")
+            c2.metric("Riesgo (SL)",    f"${abs(dist_sl):.2f} al stop",
+                      delta="si el precio sube" if tipo=="SELL" else "si el precio baja",
+                      delta_color="inverse")
+            c3.metric("Meta 1 (TP1)",   f"${abs(dist_tp1):.2f} para ganar",
+                      delta="si el precio baja" if tipo=="SELL" else "si el precio sube",
+                      delta_color="normal")
     elif state.get("last_signal"):
         st.markdown("#### 🔔 Última señal registrada")
         render_signal_card(state["last_signal"])

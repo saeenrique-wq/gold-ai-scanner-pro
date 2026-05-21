@@ -102,13 +102,25 @@ class MarketConnector:
         return False
 
     def _try_symbol(self, sym: str) -> tuple:
-        """Intenta conectar a un símbolo. Retorna (ok, precio)."""
+        """Intenta conectar a un símbolo. Retorna (ok, precio). Rápido."""
         try:
-            t   = yf.Ticker(sym)
-            df  = t.history(period="1d", interval="5m")
-            if df is None or df.empty:
+            t = yf.Ticker(sym)
+            # fast_info es instantáneo (no descarga historial)
+            try:
+                price = float(t.fast_info.last_price or 0)
+            except Exception:
+                price = 0.0
+
+            # Si fast_info no da precio, intentar última vela (más lento)
+            if price <= 0:
+                df = t.history(period="1d", interval="5m")
+                if df is None or df.empty:
+                    return False, 0.0
+                price = float(df["Close"].iloc[-1])
+
+            if price <= 0:
                 return False, 0.0
-            price = float(df["Close"].iloc[-1])
+
             # Escalar ETFs al precio del oro
             if sym == "GLD":
                 price *= 10.0

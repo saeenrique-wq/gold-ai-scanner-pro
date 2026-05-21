@@ -35,20 +35,33 @@ class AICommittee:
             votes.append(resp)
             if resp.valid:
                 logger.info(
-                    f"Ollama respondió: {resp.decision} | "
-                    f"Confianza: {resp.confianza} | Riesgo: {resp.riesgo}"
+                    f"Ollama: {resp.decision} | Confianza: {resp.confianza} | Riesgo: {resp.riesgo}"
                 )
             else:
-                logger.warning(f"Ollama: respuesta inválida — {resp.motivo}")
+                logger.warning(f"Ollama respuesta inválida: {resp.motivo}")
         else:
-            logger.warning("Ollama no disponible. Sin confirmación de IA.")
+            # Sin Ollama: la señal pasa por análisis técnico puro
+            # Score >= 7 se considera suficientemente fuerte sin IA
+            score = signal_data.get("score", 0)
+            logger.warning(f"Ollama no disponible. Usando análisis técnico puro (score={score}).")
+            if score >= 7:
+                return {
+                    "approved":   True,
+                    "decision":   "APROBAR",
+                    "confianza":  "MEDIA",
+                    "riesgo":     "MEDIO",
+                    "motivo":     f"Sin IA disponible — señal técnica fuerte (score {score}/10).",
+                    "provider":   "Técnico",
+                    "votes":      [],
+                    "vote_count": 0,
+                }
             return {
                 "approved":   False,
-                "decision":   "SIN_CONFIRMACION_IA",
-                "confianza":  "N/A",
-                "riesgo":     "N/A",
-                "motivo":     "Ollama no está corriendo. Inicia Ollama para obtener confirmación.",
-                "provider":   "Ninguna",
+                "decision":   "RECHAZAR",
+                "confianza":  "BAJA",
+                "riesgo":     "ALTO",
+                "motivo":     f"Sin IA y score técnico insuficiente ({score}/10, necesita ≥7).",
+                "provider":   "Técnico",
                 "votes":      [],
                 "vote_count": 0,
             }
@@ -80,26 +93,23 @@ class AICommittee:
                 "vote_count": 0,
             }
 
-        valid_votes  = [v for v in votes if v.valid]
+        valid_votes   = [v for v in votes if v.valid]
         approve_count = sum(1 for v in valid_votes if v.decision == "APROBAR")
-        reject_count  = sum(1 for v in valid_votes if v.decision == "RECHAZAR")
-        high_risk     = any(v.riesgo == "ALTO" for v in valid_votes)
-        low_conf      = any(v.confianza == "BAJA" for v in valid_votes)
+        reject_count  = sum(1 for v in valid_votes if v.decision in ("RECHAZAR", "RIESGO_ALTO"))
 
-        # Reglas duras de rechazo
-        if high_risk:
-            return self._build_result(
-                votes, False, "RECHAZAR", "ALTA", "ALTO",
-                "IA detectó riesgo ALTO — señal rechazada automáticamente."
-            )
-        if low_conf:
-            return self._build_result(
-                votes, False, "RECHAZAR", "BAJA", "MEDIO",
-                "IA tiene confianza BAJA — señal rechazada."
-            )
-
+        # Solo rechazar si la IA dijo explícitamente RECHAZAR o RIESGO_ALTO.
+        # No rechazar por confianza o riesgo solo — eso era demasiado estricto.
         approved = approve_count > 0 and approve_count >= reject_count
-        best     = max(valid_votes, key=lambda v: ("ALTA" in v.confianza, "APROBAR" in v.decision))
+
+        if valid_votes:
+            best = max(valid_votes, key=lambda v: (
+                v.decision == "APROBAR",
+                v.confianza == "ALTA",
+                v.confianza == "MEDIA",
+            ))
+        else:
+            return self._build_result(votes, False, "RECHAZAR", "N/A", "N/A",
+                                      "Ollama no devolvió respuesta válida.")
 
         return self._build_result(
             votes,
