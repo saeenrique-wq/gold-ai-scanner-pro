@@ -244,8 +244,17 @@ def _run_scan(tf_confirm: str, tf_trend: str, risk_usd: float, lot_size: float) 
 
     entry = signal_raw["entry"]
 
-    # Anti-duplicado: misma señal en mismo precio = ignorar
+    # Anti-duplicado nivel 1: memoria rápida (15 min cooldown)
     if _is_duplicate(signal_raw["type"], entry):
+        return
+
+    # Anti-duplicado nivel 2: base de datos (60 min, $8 tolerancia)
+    # Esto sobrevive reinicios de la app y múltiples hilos
+    if db.recent_duplicate_exists(signal_raw["type"], entry, minutes=60, tolerance=8.0):
+        _s("status_msg", f"🔍 Señal {signal_raw['type']} ya registrada hace menos de 1h — buscando otra...")
+        _LAST_SIGNAL_KEY["type"]  = signal_raw["type"]
+        _LAST_SIGNAL_KEY["entry"] = entry
+        _LAST_SIGNAL_KEY["ts"]    = time.time()
         return
 
     calc  = _risk.calculate(entry, signal_raw["type"], lot_size, risk_usd)
@@ -530,30 +539,44 @@ with tab_hist:
     st.markdown("#### 📋 Historial de señales")
     history_all = db.get_signals_history(100)
     if history_all:
-        FILTROS = {
-            "Todas":    None,
-            "COMPRAS":  ("signal_type", "BUY"),
-            "VENTAS":   ("signal_type", "SELL"),
-            "GANADAS":  ("result",      "GANADA"),
-            "PERDIDAS": ("result",      "PERDIDA"),
-            "ACTIVAS":  ("status",      "ACTIVA"),
-            "LISTAS":   ("status",      "APROBADA"),
-        }
-        ft = st.selectbox(
-            "Filtrar por:",
-            list(FILTROS.keys()),
-            index=0,
-            key="hist_filter_select",
-        )
+        cf1, cf2 = st.columns(2)
+        with cf1:
+            FILTROS = {
+                "Todas":          None,
+                "Solo COMPRAS":   ("signal_type", "BUY"),
+                "Solo VENTAS":    ("signal_type", "SELL"),
+                "Ganadas ✅":     ("result",      "GANADA"),
+                "Perdidas ❌":    ("result",      "PERDIDA"),
+                "En seguimiento": ("status",      "ACTIVA"),
+                "Listas":         ("status",      "APROBADA"),
+            }
+            ft = st.selectbox(
+                "Mostrar:",
+                list(FILTROS.keys()),
+                index=0,
+                key="hist_filter_select",
+            )
+        with cf2:
+            ESTILOS = ["Todos los estilos", "Scalping", "Day Trading", "Swing"]
+            estilo_ft = st.selectbox(
+                "Tipo de operación:",
+                ESTILOS,
+                index=0,
+                key="hist_estilo_select",
+            )
+
         campo, valor = FILTROS[ft] if FILTROS[ft] else (None, None)
         history = (
             [s for s in history_all if s.get(campo) == valor]
-            if campo else history_all
+            if campo else list(history_all)
         )
+        if estilo_ft != "Todos los estilos":
+            history = [s for s in history if s.get("signal_style","").lower() == estilo_ft.lower()]
+
         if history:
             render_history_table(history)
         else:
-            st.info(f"No hay señales con filtro '{ft}' todavía.")
+            st.info(f"No hay señales con ese filtro todavía.")
 
         st.markdown("---")
         won   = sum(1 for s in history_all if s.get("result") == "GANADA")
@@ -576,22 +599,58 @@ with tab_cfg:
 
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**Capital y riesgo**")
-        cap_op = st.selectbox("Capital base", [200, 500, 1000, "Personalizado"])
-        capital = float(st.number_input("Capital ($)", min_value=50.0, value=200.0)) \
-                  if cap_op == "Personalizado" else float(cap_op)
-        plan    = CAPITAL_PLANS.get(int(capital), CAPITAL_PLANS[200])
-        st.caption(f"Lote: {plan['lot']} | Riesgo: ${plan['risk_usd']} | Ganancia mín: ${plan['min_profit']}")
-        r_usd = st.number_input("Riesgo por op. ($)", min_value=1.0, value=float(plan["risk_usd"]))
-        lot   = st.number_input("Lotaje", min_value=0.01, value=float(plan["lot"]), step=0.01, format="%.2f")
+        st.markdown("**¿Cuánto dinero tienes para operar?**")
+        cap_op = st.selectbox(
+            "Mi capital es:",
+            ["$200 (principiante)", "$500 (intermedio)", "$1000 (avanzado)", "Personalizado"],
+            key="cap_op_sel",
+        )
+        cap_map = {"$200 (principiante)": 200, "$500 (intermedio)": 500, "$1000 (avanzado)": 1000}
+        if cap_op == "Personalizado":
+            capital = float(st.number_input("Capital exacto ($)", min_value=50.0, value=200.0, key="cap_custom"))
+        else:
+            capital = float(cap_map[cap_op])
+        plan = CAPITAL_PLANS.get(int(capital), CAPITAL_PLANS[200])
+        st.markdown(
+            f'<div style="background:#0d1117;border:1px solid #ffd700;border-radius:8px;'
+            f'padding:10px;font-size:0.85rem;">'
+            f'📦 Tamaño de operación: <b>{plan["lot"]}</b> lotes<br>'
+            f'⛔ Máximo que puedes perder por trade: <b>${plan["risk_usd"]}</b><br>'
+            f'✅ Mínimo que ganarás por trade: <b>${plan["min_profit"]}</b>'
+            f'</div>', unsafe_allow_html=True
+        )
+        r_usd = plan["risk_usd"]
+        lot   = plan["lot"]
 
     with c2:
-        st.markdown("**Temporalidades**")
-        tf_c = st.selectbox("Confirmación (análisis)", list(TIMEFRAMES.keys()), index=1)
-        tf_t = st.selectbox("Tendencia (dirección)",  list(TIMEFRAMES.keys()), index=4)
-        st.markdown("**Símbolo**")
-        sym_d = st.text_input("Nombre mostrado", value=db.get_setting("display_symbol","XAUUSD"))
-        st.caption("Fuente de datos: Yahoo Finance GC=F (Gold Futures)")
+        st.markdown("**Modo de trading**")
+        MODOS = {
+            "⚡ Scalping — entradas muy rápidas (M5)":   ("M5",  "H1"),
+            "📈 Day Trading — operaciones del día (M15)": ("M15", "H1"),
+            "🌊 Swing — varios días (M30)":               ("M30", "H1"),
+        }
+        modo_sel = st.selectbox(
+            "¿Cómo quieres operar?",
+            list(MODOS.keys()),
+            index=0,
+            key="modo_sel",
+        )
+        tf_c, tf_t = MODOS[modo_sel]
+        st.markdown(
+            '<div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;'
+            'padding:8px;font-size:0.82rem;color:#8b949e;">'
+            '⚡ <b>Scalping</b> = 1–5 min en operación<br>'
+            '📈 <b>Day Trading</b> = 15–60 min en operación<br>'
+            '🌊 <b>Swing</b> = horas o días en operación'
+            '</div>', unsafe_allow_html=True
+        )
+        st.markdown("")
+        sym_d = st.text_input(
+            "Nombre del par:",
+            value=db.get_setting("display_symbol","XAUUSD"),
+            key="sym_display_input",
+        )
+        st.caption("🌐 Datos en vivo de Yahoo Finance · Oro (GC=F)")
 
     if st.button("💾 Guardar y aplicar", use_container_width=True):
         db.set_setting("capital",           str(capital))

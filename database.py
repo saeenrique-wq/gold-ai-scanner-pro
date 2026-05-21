@@ -265,6 +265,26 @@ def get_signals_history(limit: int = 50) -> List[Dict]:
             conn.close()
 
 
+def recent_duplicate_exists(signal_type: str, entry: float,
+                            minutes: int = 60, tolerance: float = 8.0) -> bool:
+    """Devuelve True si ya existe una señal similar en los últimos N minutos."""
+    from datetime import timedelta
+    cutoff = (datetime.now() - timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S")
+    with _db_lock:
+        conn = _get_conn()
+        try:
+            row = conn.execute("""
+                SELECT COUNT(*) AS n FROM signals
+                WHERE signal_type = ?
+                  AND ABS(entry - ?) <= ?
+                  AND created_at >= ?
+                  AND status NOT IN ('RECHAZADA','CANCELADA')
+            """, (signal_type, entry, tolerance, cutoff)).fetchone()
+            return (row["n"] or 0) > 0
+        finally:
+            conn.close()
+
+
 def get_signal_by_id(signal_id: int) -> Optional[Dict]:
     with _db_lock:
         conn = _get_conn()
