@@ -65,10 +65,13 @@ ATR_PERIOD    = 14
 MIN_ATR_VALUE = 1.00   # Volatilidad mínima en USD para ORO (ajustado para GC=F ~$4500)
 
 # ─── Estrategia ───────────────────────────────────────────────────────────────
-MIN_CONFIRMATIONS  = 5   # Mínimo de condiciones que deben cumplirse
+# 6/10 confirmaciones: filtra ruido pero genera suficientes señales buenas
+# La IA (Ollama) hace el filtro final para mantener efectividad >80%
+MIN_CONFIRMATIONS  = 6   # Subido a 6 para mayor calidad (no cantidad)
 MIN_RR_RATIO       = 2.0 # Mínimo riesgo-beneficio 1:2
-MAX_WEEKLY_SIGNALS = 12  # Límite semanal
-CANDLES_NEEDED     = 210 # Velas mínimas para calcular EMA200
+MAX_WEEKLY_SIGNALS = 50  # Límite real según instrucción del usuario
+WEEKLY_TARGET_WIN  = 40  # Objetivo de ganadas (80%)
+CANDLES_NEEDED     = 100 # Mínimo para calcular indicadores
 
 # ─── Ollama ───────────────────────────────────────────────────────────────────
 OLLAMA_BASE_URL = "http://localhost:11434"
@@ -83,9 +86,9 @@ CAPITAL_PLANS = {
 }
 
 # ─── Scanner ─────────────────────────────────────────────────────────────────
-SCAN_INTERVAL_SECONDS = 60   # Cada cuántos segundos escanea el mercado
-PRICE_POLL_SECONDS    = 15   # Cada cuántos segundos actualiza precio en vivo
-TRACKER_INTERVAL      = 30   # Cada cuántos segundos revisa TP/SL activos
+SCAN_INTERVAL_SECONDS = 30   # Cada 30s: más frecuente para no perder señales
+PRICE_POLL_SECONDS    = 10   # Precio actualizado cada 10s
+TRACKER_INTERVAL      = 15   # TP/SL revisados cada 15s
 
 # ─── Colores de la interfaz ──────────────────────────────────────────────────
 COLOR_BUY        = "#00ff88"

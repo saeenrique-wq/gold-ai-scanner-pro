@@ -20,24 +20,25 @@ def render_signal_badge(signal_type: str) -> str:
     return f'<span class="chip-gold">{signal_type}</span>'
 
 
+_STATUS_LABELS = {
+    "ACTIVA":           ("🟢", "#00ff88", "EN OPERACIÓN"),
+    "APROBADA":         ("🟢", "#ffd700", "SEÑAL LISTA"),
+    "TP1_ALCANZADO":    ("✅", "#00bfff", "META 1 LOGRADA"),
+    "TP2_ALCANZADO":    ("✅", "#00bfff", "META 2 LOGRADA"),
+    "TP3_ALCANZADO":    ("✅", "#00bfff", "META 3 LOGRADA"),
+    "TP4_ALCANZADO":    ("🏆", "#00ff88", "GANANCIA MÁXIMA"),
+    "SL_TOCADO":        ("⛔", "#ff4444", "PÉRDIDA"),
+    "RECHAZADA":        ("❌", "#888888", "DESCARTADA"),
+    "CANCELADA":        ("❌", "#888888", "CANCELADA"),
+    "FINALIZADA":       ("✔️", "#888888", "CERRADA"),
+    "EN_REVISION_IA":   ("🤖", "#bf5fff", "IA REVISANDO"),
+    "POSIBLE_ENTRADA":  ("👀", "#ffee44", "POSIBLE SEÑAL"),
+    "BUSCANDO":         ("🔍", "#888888", "BUSCANDO"),
+}
+
 def render_status_badge(status: str) -> str:
-    colors = {
-        "ACTIVA":            "#00ff88",
-        "APROBADA":          "#ffd700",
-        "TP1_ALCANZADO":     "#00bfff",
-        "TP2_ALCANZADO":     "#00bfff",
-        "TP3_ALCANZADO":     "#00bfff",
-        "TP4_ALCANZADO":     "#00ff88",
-        "SL_TOCADO":         "#ff4444",
-        "RECHAZADA":         "#888888",
-        "CANCELADA":         "#888888",
-        "FINALIZADA":        "#888888",
-        "EN_REVISION_IA":    "#bf5fff",
-        "POSIBLE_ENTRADA":   "#ffee44",
-        "BUSCANDO":          "#888888",
-    }
-    color = colors.get(status, "#888888")
-    return f'<span style="color:{color};font-weight:700">{status}</span>'
+    icon, color, label = _STATUS_LABELS.get(status, ("●", "#888888", status))
+    return f'<span style="color:{color};font-weight:700">{icon} {label}</span>'
 
 
 def render_weekly_bar(used: int, limit: int) -> str:

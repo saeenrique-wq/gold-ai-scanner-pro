@@ -3,7 +3,7 @@ import threading
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 
-from config import DB_PATH, get_logger, MAX_WEEKLY_SIGNALS
+from config import DB_PATH, get_logger, MAX_WEEKLY_SIGNALS, WEEKLY_TARGET_WIN
 from models import Signal, SignalEvent, WeeklyStats
 
 logger = get_logger("database")
