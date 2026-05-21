@@ -151,9 +151,10 @@ def _scanner_loop(symbol, tf_confirm, tf_trend,
 
     _s("status_msg", "Buscando señales...")
 
-    last_price_poll   = 0.0
-    last_scan_time    = 0.0
-    last_tracker_time = 0.0
+    last_price_poll    = 0.0
+    last_scan_time     = 0.0
+    last_tracker_time  = 0.0
+    last_ollama_check  = 0.0
 
     # ── Bucle principal ──────────────────────────────────────────────────────
     while not stop_event.is_set():
@@ -176,6 +177,15 @@ def _scanner_loop(symbol, tf_confirm, tf_trend,
             except Exception as e:
                 logger.error(f"Error precio: {e}")
             last_price_poll = now
+
+        # Verificar Ollama cada 60 segundos (por si el usuario lo inicia después)
+        if (now - last_ollama_check) >= 60:
+            try:
+                ok = _ollama.is_available(force_check=True)
+                _s("ollama_connected", ok)
+            except Exception:
+                pass
+            last_ollama_check = now
 
         # Revisar TP/SL de señales activas
         if (now - last_tracker_time) >= TRACKER_INTERVAL:
@@ -239,7 +249,21 @@ def _is_duplicate(signal_type: str, entry: float) -> bool:
     return False
 
 
+_SCAN_LOCK = threading.Lock()   # evita que 2 hilos escaneen al mismo tiempo
+
 def _run_scan(tf_confirm: str, tf_trend: str, risk_usd: float, lot_size: float) -> None:
+    global _connector, _risk, _strategy, _committee
+
+    # Solo un escaneo a la vez (por si hay 2 hilos accidentales)
+    if not _SCAN_LOCK.acquire(blocking=False):
+        return
+    try:
+        _run_scan_inner(tf_confirm, tf_trend, risk_usd, lot_size)
+    finally:
+        _SCAN_LOCK.release()
+
+
+def _run_scan_inner(tf_confirm: str, tf_trend: str, risk_usd: float, lot_size: float) -> None:
     global _connector, _risk, _strategy, _committee
 
     df_m5  = _connector.get_candles(tf_confirm, 210, force_refresh=True)
@@ -378,14 +402,16 @@ def stop_scanner() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  AUTO-ARRANQUE: iniciar scanner automáticamente si no está corriendo
+#  AUTO-ARRANQUE — garantiza UN SOLO hilo activo en todo el proceso
 # ═══════════════════════════════════════════════════════════════════════════════
+_START_LOCK = threading.Lock()   # evita que 2 reruns simultáneos inicien 2 hilos
+
 def _autostart() -> None:
-    """Inicia el scanner automáticamente al abrir la app."""
-    thread = _STATE.get("thread")
-    is_alive = thread is not None and thread.is_alive()
-    if not _STATE["running"] and not is_alive:
-        start_scanner()
+    with _START_LOCK:
+        thread   = _STATE.get("thread")
+        is_alive = thread is not None and thread.is_alive()
+        if not _STATE["running"] and not is_alive:
+            start_scanner()
 
 _autostart()
 
@@ -400,7 +426,12 @@ st.set_page_config(
 )
 st.markdown(load_css(), unsafe_allow_html=True)
 
-state = _g()
+# Leer estado fresco en cada render (no cachear)
+def _fresh() -> Dict:
+    with _LOCK:
+        return dict(_STATE)
+
+state = _fresh()
 
 # ── Sonidos pendientes ────────────────────────────────────────────────────────
 _pending_sounds = state.get("sound_queue", [])
@@ -416,7 +447,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Fila de estado — lo primero que ve el usuario ────────────────────────────
+# ── Fila de estado — leer siempre el valor más fresco ────────────────────────
+state   = _fresh()          # refrescar justo aquí para los badges
 price   = state["current_price"]
 mkt_ok  = state["market_connected"]
 ia_ok   = state["ollama_connected"]
@@ -515,24 +547,35 @@ tab_señal, tab_hist, tab_cfg, tab_ia = st.tabs([
 # SEÑAL ACTIVA
 # ════════════════════════════════════════════════════════
 with tab_señal:
-    last_sig = state.get("last_signal")
-    active   = db.get_active_signals()
+    # Mostrar SOLO la señal más reciente activa (nunca duplicados)
+    active_all = db.get_active_signals()
+    # Deduplicar por ID (ya viene ordenado DESC, primer ID = más reciente)
+    seen_ids = set()
+    active = []
+    for sig in active_all:
+        if sig["id"] not in seen_ids:
+            seen_ids.add(sig["id"])
+            active.append(sig)
+    # Solo mostrar la señal activa más reciente
+    active = active[:1]
 
     if active:
-        st.markdown("#### ⚡ Señales en seguimiento")
-        for sig in active:
-            render_signal_card(sig)
-            if price > 0:
-                tipo = sig["signal_type"]
-                dist_sl  = (price - sig["sl"]) if tipo == "BUY" else (sig["sl"] - price)
-                dist_tp1 = (sig["tp1"] - price) if tipo == "BUY" else (price - sig["tp1"])
-                c1, c2 = st.columns(2)
-                c1.metric("Distancia al SL",  f"${dist_sl:.2f}")
-                c2.metric("Distancia al TP1", f"${dist_tp1:.2f}")
-            st.markdown("")
-    elif last_sig:
-        st.markdown("#### 🔔 Última señal generada")
-        render_signal_card(last_sig)
+        sig = active[0]
+        tipo_label = "🟢 SEÑAL DE COMPRA" if sig["signal_type"] == "BUY" else "🔴 SEÑAL DE VENTA"
+        st.markdown(f"#### ⚡ {tipo_label} — EN SEGUIMIENTO")
+        render_signal_card(sig)
+        if price > 0:
+            tipo = sig["signal_type"]
+            dist_sl  = (price - sig["sl"])  if tipo == "BUY" else (sig["sl"]  - price)
+            dist_tp1 = (sig["tp1"] - price) if tipo == "BUY" else (price - sig["tp1"])
+            c1, c2 = st.columns(2)
+            c1.metric("Distancia al SL",  f"${abs(dist_sl):.2f}",
+                      delta="Límite de pérdida", delta_color="inverse")
+            c2.metric("Distancia al TP1", f"${abs(dist_tp1):.2f}",
+                      delta="Primera meta", delta_color="normal")
+    elif state.get("last_signal"):
+        st.markdown("#### 🔔 Última señal registrada")
+        render_signal_card(state["last_signal"])
     else:
         st.markdown(
             '<div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;'
@@ -540,7 +583,7 @@ with tab_señal:
             '<div style="font-size:3rem">📡</div>'
             '<div style="color:#ffd700;font-size:1.1rem;margin-top:10px;">Buscando señal de alta probabilidad...</div>'
             '<div style="color:#888;font-size:0.85rem;margin-top:6px;">'
-            'El scanner analiza el mercado cada 60 segundos con EMA, RSI, MACD y ATR</div>'
+            'Analizando mercado con EMA, RSI, MACD y ATR cada 30 segundos</div>'
             '</div>', unsafe_allow_html=True)
 
     # Actividad reciente
@@ -558,7 +601,45 @@ with tab_señal:
 # ════════════════════════════════════════════════════════
 with tab_hist:
     st.markdown("#### 📋 Historial de señales")
-    history_all = db.get_signals_history(100)
+    history_all_raw = db.get_signals_history(200)
+
+    # Deduplicar: si hay señales con mismo tipo+entry+sl en menos de 1 hora, queda solo la primera
+    seen_sigs: dict = {}
+    history_all = []
+    for s in reversed(history_all_raw):  # más antiguo primero para conservar el original
+        key = (s["signal_type"], round(s["entry"], 0))
+        if key not in seen_sigs:
+            seen_sigs[key] = s["created_at"]
+            history_all.append(s)
+        else:
+            # si la diferencia es > 2 horas, es una señal diferente (precio similar, otro día)
+            from datetime import datetime as _dt
+            try:
+                t1 = _dt.strptime(seen_sigs[key][:16], "%Y-%m-%d %H:%M")
+                t2 = _dt.strptime(s["created_at"][:16], "%Y-%m-%d %H:%M")
+                if abs((t2 - t1).total_seconds()) > 7200:
+                    seen_sigs[key] = s["created_at"]
+                    history_all.append(s)
+            except Exception:
+                history_all.append(s)
+    history_all = list(reversed(history_all))  # más reciente primero
+
+    # ── Efectividad al tope ───────────────────────────────────────────────────
+    won_all   = sum(1 for s in history_all if s.get("result") == "GANADA")
+    lost_all  = sum(1 for s in history_all if s.get("result") == "PERDIDA")
+    total_all = won_all + lost_all
+    efectividad = f"{won_all/total_all*100:.0f}%" if total_all > 0 else "—"
+
+    ea, eb, ec, ed = st.columns(4)
+    ea.metric("Total señales",  len(history_all))
+    eb.metric("Ganadas ✅",     won_all)
+    ec.metric("Perdidas ❌",    lost_all)
+    ed.metric("Efectividad",    efectividad,
+              delta="objetivo 80%" if total_all > 0 else None,
+              delta_color="normal" if won_all/max(total_all,1) >= 0.8 else "inverse")
+
+    st.markdown("")
+
     if history_all:
         cf1, cf2 = st.columns(2)
         with cf1:
@@ -569,45 +650,24 @@ with tab_hist:
                 "Ganadas ✅":     ("result",      "GANADA"),
                 "Perdidas ❌":    ("result",      "PERDIDA"),
                 "En seguimiento": ("status",      "ACTIVA"),
-                "Listas":         ("status",      "APROBADA"),
             }
-            ft = st.selectbox(
-                "Mostrar:",
-                list(FILTROS.keys()),
-                index=0,
-                key="hist_filter_select",
-            )
+            ft = st.selectbox("Mostrar:", list(FILTROS.keys()), index=0,
+                              key="hist_filter_select")
         with cf2:
             ESTILOS = ["Todos los estilos", "Scalping", "Day Trading", "Swing"]
-            estilo_ft = st.selectbox(
-                "Tipo de operación:",
-                ESTILOS,
-                index=0,
-                key="hist_estilo_select",
-            )
+            estilo_ft = st.selectbox("Tipo de operación:", ESTILOS, index=0,
+                                     key="hist_estilo_select")
 
         campo, valor = FILTROS[ft] if FILTROS[ft] else (None, None)
-        history = (
-            [s for s in history_all if s.get(campo) == valor]
-            if campo else list(history_all)
-        )
+        history = ([s for s in history_all if s.get(campo) == valor]
+                   if campo else list(history_all))
         if estilo_ft != "Todos los estilos":
             history = [s for s in history if s.get("signal_style","").lower() == estilo_ft.lower()]
 
         if history:
             render_history_table(history)
         else:
-            st.info(f"No hay señales con ese filtro todavía.")
-
-        st.markdown("---")
-        won   = sum(1 for s in history_all if s.get("result") == "GANADA")
-        lost  = sum(1 for s in history_all if s.get("result") == "PERDIDA")
-        total = won + lost
-        if total > 0:
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Ganadas",   won)
-            c2.metric("Perdidas",  lost)
-            c3.metric("Efectividad", f"{won/total*100:.1f}%")
+            st.info("No hay señales con ese filtro todavía.")
     else:
         st.info("No hay señales registradas todavía. El scanner está en búsqueda.")
 
@@ -708,6 +768,14 @@ with tab_cfg:
         time.sleep(2)
         start_scanner()
         st.success("Reiniciando...")
+
+    st.markdown("---")
+    st.markdown("**🗑 Borrar señales de prueba**")
+    st.caption("Usa esto si el historial tiene señales repetidas o de prueba.")
+    if st.button("🗑 Borrar TODAS las señales del historial", type="secondary"):
+        n = db.delete_all_signals()
+        _s("last_signal", None)
+        st.success(f"✅ {n} señales borradas. El scanner sigue corriendo.")
 
 # ════════════════════════════════════════════════════════
 # IA & APIs

@@ -116,8 +116,8 @@ class SignalTracker:
                 self._save_event(signal_id, "TP1_ALCANZADO", price, f"TP1 alcanzado a ${price:.2f}")
                 result_msg = f"✅ Señal #{signal_id} SELL — TP1 alcanzado a ${price:.2f}"
 
-        # Marcar como ACTIVA si aún no lo estaba
-        elif status == "APROBADA":
+        # Marcar como ACTIVA si aún no hay evento (señal esperando)
+        if not result_msg and status == "APROBADA":
             db.update_signal_status(signal_id, "ACTIVA")
 
         return result_msg

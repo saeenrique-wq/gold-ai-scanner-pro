@@ -265,6 +265,26 @@ def get_signals_history(limit: int = 50) -> List[Dict]:
             conn.close()
 
 
+def delete_all_signals() -> int:
+    """Borra todas las señales y eventos. Retorna cantidad eliminada."""
+    with _db_lock:
+        conn = _get_conn()
+        try:
+            n = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+            conn.execute("DELETE FROM signal_events")
+            conn.execute("DELETE FROM signals")
+            conn.execute("DELETE FROM sqlite_sequence WHERE name='signals'")
+            conn.execute("DELETE FROM sqlite_sequence WHERE name='signal_events'")
+            conn.commit()
+            logger.info(f"Borradas {n} señales y sus eventos.")
+            return n
+        except Exception as e:
+            logger.error(f"Error borrando señales: {e}")
+            return 0
+        finally:
+            conn.close()
+
+
 def recent_duplicate_exists(signal_type: str, entry: float,
                             minutes: int = 60, tolerance: float = 8.0) -> bool:
     """Devuelve True si ya existe una señal similar en los últimos N minutos."""
