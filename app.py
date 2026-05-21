@@ -32,7 +32,7 @@ from ai.ai_committee   import AICommittee
 from alerts.telegram_alerts import TelegramAlerter
 from web.styles       import load_css
 from web.dashboard    import render_signal_card, render_history_table, render_weekly_bar
-from web.audio_alerts import play_sounds
+from web.audio_alerts import play_sounds, render_sound_button
 
 logger = get_logger("app")
 
@@ -440,12 +440,16 @@ if _pending_sounds:
     with _LOCK:
         _STATE["sound_queue"] = []
 
-# ── Título ────────────────────────────────────────────────────────────────────
-st.markdown(
-    '<div class="main-title">⚜ GOLD AI SCANNER PRO</div>'
-    '<div class="subtitle">XAUUSD · IA LOCAL · TIEMPO REAL</div>',
-    unsafe_allow_html=True,
-)
+# ── Título + botón de sonido ──────────────────────────────────────────────────
+_t_col, _s_col = st.columns([5, 1])
+with _t_col:
+    st.markdown(
+        '<div class="main-title">⚜ GOLD AI SCANNER PRO</div>'
+        '<div class="subtitle">XAUUSD · IA LOCAL · TIEMPO REAL</div>',
+        unsafe_allow_html=True,
+    )
+with _s_col:
+    render_sound_button()
 
 # ── Fila de estado — leer siempre el valor más fresco ────────────────────────
 state   = _fresh()          # refrescar justo aquí para los badges
@@ -857,13 +861,11 @@ with tab_ia:
                     st.success("Guardado.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  AUTO-REFRESH cada 5 segundos mientras el scanner corre
+#  AUTO-REFRESH — siempre cada 5 segundos, reinicia scanner si murió
 # ══════════════════════════════════════════════════════════════════════════════
-if _STATE["running"]:
-    time.sleep(5)
-    st.rerun()
-elif not _STATE["running"] and _STATE.get("thread") is None:
-    # Si el scanner se detuvo inesperadamente, reiniciarlo
-    time.sleep(3)
-    _autostart()
-    st.rerun()
+_th = _STATE.get("thread")
+_th_alive = _th is not None and _th.is_alive()
+if not _STATE["running"] and not _th_alive:
+    _autostart()   # reiniciar si el scanner murió por error de red
+time.sleep(5)
+st.rerun()

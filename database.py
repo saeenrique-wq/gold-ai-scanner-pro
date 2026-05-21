@@ -117,7 +117,7 @@ def init_db() -> None:
                 ("symbol",            "GC=F"),
                 ("display_symbol",    "XAUUSD"),
                 ("timeframe_entry",   "M5"),
-                ("timeframe_confirm", "M15"),
+                ("timeframe_confirm", "M5"),
                 ("timeframe_trend",   "H1"),
                 ("signal_style",      "Scalping"),
                 ("ollama_model",      "llama3.2:3b"),
@@ -129,6 +129,15 @@ def init_db() -> None:
                 c.execute(
                     "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
                     (key, val),
+                )
+
+            # Migración: si timeframe_confirm es M15 (default antiguo), cambiar a M5
+            row_tf = conn.execute(
+                "SELECT value FROM settings WHERE key='timeframe_confirm'"
+            ).fetchone()
+            if row_tf and row_tf["value"] == "M15":
+                conn.execute(
+                    "UPDATE settings SET value='M5' WHERE key='timeframe_confirm'"
                 )
 
             conn.commit()
